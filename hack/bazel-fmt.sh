@@ -17,7 +17,7 @@
 # Copyright 2019 Red Hat, Inc.
 #
 
-set -e
+set -ex
 
 source hack/common.sh
 source hack/bootstrap.sh
@@ -33,6 +33,9 @@ bazel run \
     --config=${HOST_ARCHITECTURE} ${BAZEL_CS_CONFIG} \
     //:goimports
 # align BAZEL files to a single format
+
+env
+
 bazel run \
     --config=${HOST_ARCHITECTURE} ${BAZEL_CS_CONFIG} \
     //:buildifier

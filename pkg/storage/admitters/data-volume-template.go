@@ -52,6 +52,7 @@ func (a Admitter) validateVirtualMachineDataVolumeTemplateNamespace() ([]metav1.
 		}
 	}
 
+	fmt.Printf("test!\n")
 	for idx, dataVolume := range a.vm.Spec.DataVolumeTemplates {
 		targetNamespace := a.vm.Namespace
 		if targetNamespace == "" {

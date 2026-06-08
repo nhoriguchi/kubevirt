@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -ex
 
 # Source common without doing any bootstrap work at this stage
 # Bootstrapping should be done inside the build container
