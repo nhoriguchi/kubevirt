@@ -98,7 +98,7 @@ function finish() {
 }
 trap finish EXIT
 
-RSYNCD_PORT=$($KUBEVIRT_CRI port $RSYNC_CID 873 | cut -d':' -f2)
+RSYNCD_PORT=$($KUBEVIRT_CRI port $RSYNC_CID | grep 873 | cut -d':' -f2)
 
 rsynch_fail_count=0
 
@@ -148,11 +148,16 @@ mkdir -p "${HOME}/.docker/secrets"
 volumes="$volumes -v ${HOME}/.docker/secrets:/root/.docker/secrets:ro${selinux_bind_options}"
 
 # Use a bind-mount to expose docker/podman auth file to the container
+echo KUBEVIRT_CRI = $KUBEVIRT_CRI
+echo "${XDG_RUNTIME_DIR}/containers/auth.json"
+cat "${XDG_RUNTIME_DIR}/containers/auth.json"
 if [[ $KUBEVIRT_CRI = podman* ]] && [[ -f "${XDG_RUNTIME_DIR}/containers/auth.json" ]]; then
-    volumes="$volumes --mount type=bind,source=${XDG_RUNTIME_DIR}/containers/auth.json,target=/root/.docker/config.json,readonly"
+#    volumes="$volumes --mount type=bind,source=${XDG_RUNTIME_DIR}/containers/auth.json,target=/root/.docker/config.json,ro"
+    volumes="$volumes -v ${XDG_RUNTIME_DIR}/containers/auth.json:/root/.docker/config.json:ro"
 elif [[ -f "${HOME}/.docker/config.json" && "$(cat ${HOME}/.docker/config.json | jq 'has("credHelpers")')" != "true" ]]; then
-    volumes="$volumes --mount type=bind,source=${HOME}/.docker/config.json,target=/root/.docker/config.json,readonly"
+    volumes="$volumes --mount type=bind,source=${HOME}/.docker/config.json,target=/root/.docker/config.json,ro"
 fi
+echo volumes = $volumes
 
 # add custom docker certs, if needed
 if [ -n "$DOCKER_CA_CERT_FILE" ] && [ -f "$DOCKER_CA_CERT_FILE" ]; then
