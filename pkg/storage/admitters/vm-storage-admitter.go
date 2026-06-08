@@ -70,11 +70,16 @@ func (a Admitter) Admit() ([]metav1.StatusCause, error) {
 
 	dvs, err := a.virtClient.CdiClient().CdiV1beta1().DataVolumes(a.vm.Namespace).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
+		fmt.Printf("failed to fetch dvs: %v\n", err)
 		return causes, err
 	}
+	fmt.Printf("-- DVS: %v\n", len(dvs.Items))
 	for _, dv := range dvs.Items {
+		fmt.Printf("--- name: %v\n", dv.ObjectMeta.Name)
 		for _, templateDataVolume := range a.vm.Spec.DataVolumeTemplates {
+			fmt.Printf("---- name2: %v\n", templateDataVolume.Name)
 			if dv.ObjectMeta.Name == templateDataVolume.Name {
+				fmt.Printf("----- ! DataVolume %s already exist in namespace %s", templateDataVolume.Name, a.vm.Namespace)
 				causes = append(causes, metav1.StatusCause{
 					Type:    metav1.CauseTypeFieldValueInvalid,
 					Message: fmt.Sprintf("DataVolume %s already exist in namespace %s", templateDataVolume.Name, a.vm.Namespace),
