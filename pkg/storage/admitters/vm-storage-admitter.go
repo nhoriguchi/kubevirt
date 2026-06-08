@@ -21,6 +21,7 @@ package admitters
 
 import (
 	"context"
+	"fmt"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -65,6 +66,22 @@ func (a Admitter) Admit() ([]metav1.StatusCause, error) {
 	causes, err := a.validateVirtualMachineDataVolumeTemplateNamespace()
 	if err != nil || len(causes) > 0 {
 		return causes, err
+	}
+
+	dvs, err := a.virtClient.CdiClient().CdiV1beta1().DataVolumes(a.vm.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return causes, err
+	}
+	for _, dv := range dvs.Items {
+		for _, templateDataVolume := range a.vm.Spec.DataVolumeTemplates {
+			if dv.ObjectMeta.Name == templateDataVolume.Name {
+				causes = append(causes, metav1.StatusCause{
+					Type:    metav1.CauseTypeFieldValueInvalid,
+					Message: fmt.Sprintf("DataVolume %s already exist in namespace %s", templateDataVolume.Name, a.vm.Namespace),
+				})
+				return causes, nil
+			}
+		}
 	}
 
 	causes = a.AdmitStatus()
