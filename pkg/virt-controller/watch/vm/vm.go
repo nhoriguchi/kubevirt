@@ -516,6 +516,7 @@ func (c *Controller) handleDataVolumes(vm *virtv1.VirtualMachine) (bool, error) 
 	}
 	for _, template := range vm.Spec.DataVolumeTemplates {
 		curDataVolume, err := storagetypes.GetDataVolumeFromCache(vm.Namespace, template.Name, c.dataVolumeStore)
+		fmt.Printf("-1 namespace:%s, template:%s curDataVolume:%v err:%v\n", vm.Namespace, template.Name, curDataVolume, err)
 		if err != nil {
 			return false, err
 		}
@@ -532,6 +533,7 @@ func (c *Controller) handleDataVolumes(vm *virtv1.VirtualMachine) (bool, error) 
 			if err != nil {
 				return ready, fmt.Errorf("unable to create DataVolume manifest: %v", err)
 			}
+			fmt.Printf("-2 namespace:%s, template:%s newDataVolume:%v\n", vm.Namespace, template.Name, newDataVolume)
 
 			// We validate requirements that are exclusive to clone DataVolumes
 			if err = c.handleCloneDataVolume(vm, newDataVolume); err != nil {
@@ -540,6 +542,7 @@ func (c *Controller) handleDataVolumes(vm *virtv1.VirtualMachine) (bool, error) 
 
 			c.dataVolumeExpectations.ExpectCreations(vmKey, 1)
 			curDataVolume, err = c.clientset.CdiClient().CdiV1beta1().DataVolumes(vm.Namespace).Create(context.Background(), newDataVolume, metav1.CreateOptions{})
+			fmt.Printf("-5 template:%s curDataVolume:%v, err:%v\n", template.Name, curDataVolume, err)
 			if err != nil {
 				c.dataVolumeExpectations.CreationObserved(vmKey)
 				if pvc != nil && strings.Contains(err.Error(), "already exists") {
@@ -551,8 +554,10 @@ func (c *Controller) handleDataVolumes(vm *virtv1.VirtualMachine) (bool, error) 
 				c.recorder.Eventf(vm, k8score.EventTypeWarning, FailedDataVolumeCreateReason, "Error creating DataVolume %s: %v", newDataVolume.Name, err)
 				return ready, fmt.Errorf("failed to create DataVolume: %v", err)
 			}
+			fmt.Printf("-3 namespace:%s, template:%s curDataVolume:%v\n", vm.Namespace, template.Name, curDataVolume)
 			c.recorder.Eventf(vm, k8score.EventTypeNormal, SuccessfulDataVolumeCreateReason, "Created DataVolume %s", curDataVolume.Name)
 		} else {
+			fmt.Printf("-4 namespace:%s, template:%s curDataVolume.Status:%v, ownerReferences:%v\n", vm.Namespace, template.Name, curDataVolume.Status.Phase, curDataVolume.ObjectMeta.OwnerReferences)
 			if curDataVolume.ObjectMeta.OwnerReferences.Name != vm.Name {
 				ready = false
 				return ready, fmt.Errorf("DataVolumeTemplate found pre-existing or conflicting DataVolume")
@@ -1260,6 +1265,7 @@ func (c *Controller) cleanupRestartRequired(vm *virtv1.VirtualMachine) *virtv1.V
 
 func (c *Controller) startVMI(vm *virtv1.VirtualMachine) (*virtv1.VirtualMachine, error) {
 	ready, err := c.handleDataVolumes(vm)
+	fmt.Printf("xx10 startVMI vm:%s, ready:%v, err:%v\n", vm.ObjectMeta.Name, ready, err)
 	if err != nil {
 		return vm, err
 	}
