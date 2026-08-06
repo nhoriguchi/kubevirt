@@ -257,11 +257,13 @@ func ListDataVolumesFromVolumes(namespace string, volumes []virtv1.Volume, dataV
 
 	for _, volume := range volumes {
 		dataVolumeName := getDataVolumeName(namespace, volume, pvcStore)
+		fmt.Printf("---2a namespace: %s, dvname: %v\n", namespace, dataVolumeName)
 		if dataVolumeName == nil {
 			continue
 		}
 
 		dv, err := GetDataVolumeFromCache(namespace, *dataVolumeName, dataVolumeStore)
+		fmt.Printf("---2b dv: %v\n", dv)
 		if err != nil {
 			return dataVolumes, err
 		} else if dv == nil {

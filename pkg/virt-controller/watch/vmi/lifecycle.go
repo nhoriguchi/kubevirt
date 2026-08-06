@@ -76,6 +76,7 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 			shareableMap[disk.Name] = true
 		}
 	}
+	fmt.Printf("---4a acquireVolumeLeases: %v\n", shareableMap)
 
 	for _, volume := range vmi.Spec.Volumes {
 		var claimName string
@@ -85,12 +86,14 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 			claimName = volume.PersistentVolumeClaim.ClaimName
 		}
 
+		fmt.Printf("---4b claimname: %s\n", claimName)
 		if claimName == "" || shareableMap[volume.Name] {
 			continue
 		}
 
 		leaseName := fmt.Sprintf("volume-lease-%s", claimName)
 		lease, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+		fmt.Printf("---4c find Lease: err: %s, %v\n", err, lease)
 		if k8serrors.IsNotFound(err) {
 			controllerRef := metav1.NewControllerRef(vmi, virtv1.VirtualMachineInstanceGroupVersionKind)
 			newLease := &coordinationv1.Lease{
@@ -107,11 +110,13 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 				},
 			}
 			_, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Create(context.Background(), newLease, metav1.CreateOptions{})
+			fmt.Printf("---4d create Lease: err: %s, lease: %v\n", err, newLease)
 			if err != nil && !k8serrors.IsAlreadyExists(err) {
 				return err
 			}
 			if k8serrors.IsAlreadyExists(err) {
 				lease, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+				fmt.Printf("---4e use Lease: err: %s, lease: %v\n", err, lease)
 				if err != nil {
 					return err
 				}
@@ -122,6 +127,7 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 			return err
 		}
 
+		fmt.Printf("---4f check Lease: err: %v\n", lease)
 		if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != string(vmi.UID) {
 			c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, "VolumeLocked", "DataVolume %s is already locked by another VMI (UID: %s)", claimName, *lease.Spec.HolderIdentity)
 			return fmt.Errorf("volume %s is locked by VMI %s", claimName, *lease.Spec.HolderIdentity)
@@ -338,6 +344,7 @@ func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, da
 		if err := c.acquireVolumeLeases(vmi); err != nil {
 			return common.NewSyncError(err, "VolumeLocked"), pod
 		}
+		fmt.Printf("---3 acquired Volume Lease: %v\n", err)
 		// ここに来たら Lock されているということだけど。この後抜けたらどうなる?
 		// その後の呼び出しで、自分自身が Lease できているなら、そのまま使い続けて問題ないが、
 		// 他の VMI が要求した場合、二重ロックにならないか。

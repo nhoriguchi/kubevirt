@@ -297,11 +297,13 @@ func (c *Controller) createAttachmentPod(vmi *v1.VirtualMachineInstance, virtLau
 	// ★ 追加: Hotplug 対象ボリュームの排他ロックを取得
 	for _, volume := range volumes {
 		claimName := storagetypes.PVCNameFromVirtVolume(volume)
+		fmt.Printf("---5a createAttachmentPod volume name %s, claim name %s\n", volume.Name, claimName)
 		if claimName == "" {
 			continue
 		}
 		// static DV と同様に Lease (volume-lease-<claimName>) を取得・チェック
 		if err := c.acquireSingleVolumeLease(vmi, claimName); err != nil {
+			fmt.Printf("---5b createAttachmentPod c.acquireSingleVolumeLease %s\n", err)
 			c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, "VolumeLocked", "Hotplug volume %s is locked: %v", claimName, err)
 			return nil, common.NewSyncError(err, "VolumeLocked")
 		}
@@ -309,6 +311,7 @@ func (c *Controller) createAttachmentPod(vmi *v1.VirtualMachineInstance, virtLau
 
 	vmiKey := controller.VirtualMachineInstanceKey(vmi)
 	pod, err := c.createPod(vmiKey, vmi.Namespace, attachmentPodTemplate)
+	fmt.Printf("---5c createAttachmentPod no existing Lease found for vmi %s, vmiKey %v, creatpod err %v\n", vmi.Name, vmiKey, err)
 	if err != nil {
 		c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, controller.FailedCreatePodReason, "Error creating attachment pod: %v", err)
 		return nil, common.NewSyncError(fmt.Errorf("Error creating attachment pod %v", err), controller.FailedCreatePodReason)
