@@ -228,6 +228,11 @@ func VolumeReadyToAttachToNode(namespace string, volume virtv1.Volume, dataVolum
 	ready := false
 	// err is always nil
 	pvcInterface, pvcExists, _ := pvcStore.GetByKey(fmt.Sprintf("%s/%s", namespace, name))
+	fmt.Printf("---1 namespace: %s, name %s\n", namespace, name)
+	fmt.Printf("---1 volumes %v\n", volume)
+	fmt.Printf("---1 dataVolumes %v\n", dataVolumes)
+	fmt.Printf("---1 pvcInterface %v\n", pvcInterface)
+	fmt.Printf("---1 pvcExists %v\n", pvcExists)
 	if pvcExists {
 		var err error
 		pvc := pvcInterface.(*k8sv1.PersistentVolumeClaim)
