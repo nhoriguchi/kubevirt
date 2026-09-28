@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	k8sv1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -62,6 +63,76 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
 	"kubevirt.io/kubevirt/pkg/virtiofs"
 )
+
+func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) error {
+	if vmi.IsFinal() {
+		return nil
+	}
+
+	disks := vmi.Spec.Domain.Devices.Disks
+	shareableMap := make(map[string]bool)
+	for _, disk := range disks {
+		if disk.Shareable != nil && *disk.Shareable {
+			shareableMap[disk.Name] = true
+		}
+	}
+
+	for _, volume := range vmi.Spec.Volumes {
+		var claimName string
+		if volume.DataVolume != nil {
+			claimName = volume.DataVolume.Name
+		} else if volume.PersistentVolumeClaim != nil {
+			claimName = volume.PersistentVolumeClaim.ClaimName
+		}
+
+		if claimName == "" || shareableMap[volume.Name] {
+			continue
+		}
+
+		leaseName := fmt.Sprintf("volume-lease-%s", claimName)
+		lease, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+		if k8serrors.IsNotFound(err) {
+			newLease := &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      leaseName,
+					Namespace: vmi.Namespace,
+				},
+				Spec: coordinationv1.LeaseSpec{
+					HolderIdentity: pointer.P(string(vmi.UID)),
+					AcquireTime:    &metav1.MicroTime{Time: time.Now()},
+				},
+			}
+			_, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Create(context.Background(), newLease, metav1.CreateOptions{})
+			if err != nil && !k8serrors.IsAlreadyExists(err) {
+				return err
+			}
+			if k8serrors.IsAlreadyExists(err) {
+				lease, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+			} else {
+				continue
+			}
+		} else if err != nil {
+			return err
+		}
+
+		if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != string(vmi.UID) {
+			c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, "VolumeLocked", "DataVolume %s is already locked by another VMI (UID: %s)", claimName, *lease.Spec.HolderIdentity)
+			return fmt.Errorf("volume %s is locked by VMI %s", claimName, *lease.Spec.HolderIdentity)
+		}
+
+		if lease.Spec.HolderIdentity == nil {
+			lease.Spec.HolderIdentity = pointer.P(string(vmi.UID))
+			lease.Spec.AcquireTime = &metav1.MicroTime{Time: time.Now()}
+			if _, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Update(context.Background(), lease, metav1.UpdateOptions{}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, dataVolumes []*cdiv1.DataVolume) (common.SyncError, *k8sv1.Pod) {
 	key := controller.VirtualMachineInstanceKey(vmi)
@@ -112,6 +183,11 @@ func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, da
 			log.Log.V(3).Object(vmi).Infof("Delaying pod creation while DataVolume populates or while we wait for PVCs to appear.")
 			return nil, pod
 		}
+
+		if err := c.acquireVolumeLeases(vmi); err != nil {
+			return common.NewSyncError(err, "VolumeLocked"), pod
+		}
+
 		// ensure the VMI doesn't have an unfinished migration before creating the pod
 		activeMigration, err := migrations.ActiveMigrationExistsForVMI(c.migrationIndexer, vmi)
 		if err != nil {
