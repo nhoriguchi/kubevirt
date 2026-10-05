@@ -144,6 +144,95 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 	return nil
 }
 
+func (c *Controller) acquireSingleVolumeLease(vmi *virtv1.VirtualMachineInstance, claimName string) error {
+	if claimName == "" {
+		return nil
+	}
+
+	leaseName := fmt.Sprintf("volume-lease-%s", claimName)
+	lease, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		controllerRef := metav1.NewControllerRef(vmi, virtv1.VirtualMachineInstanceGroupVersionKind)
+		newLease := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      leaseName,
+				Namespace: vmi.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					*controllerRef,
+				},
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: pointer.P(string(vmi.UID)),
+				AcquireTime:    &metav1.MicroTime{Time: time.Now()},
+			},
+		}
+		_, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Create(context.Background(), newLease, metav1.CreateOptions{})
+		if err != nil && !k8serrors.IsAlreadyExists(err) {
+			return err
+		}
+		if k8serrors.IsAlreadyExists(err) {
+			lease, err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+		} else {
+			return nil
+		}
+	} else if err != nil {
+		return err
+	}
+
+	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity != string(vmi.UID) {
+		c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, "VolumeLocked", "DataVolume %s is already locked by another VMI (UID: %s)", claimName, *lease.Spec.HolderIdentity)
+		return fmt.Errorf("volume %s is locked by VMI %s", claimName, *lease.Spec.HolderIdentity)
+	}
+
+	if lease.Spec.HolderIdentity == nil {
+		lease.Spec.HolderIdentity = pointer.P(string(vmi.UID))
+		lease.Spec.AcquireTime = &metav1.MicroTime{Time: time.Now()}
+		if _, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Update(context.Background(), lease, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Controller) releaseSingleVolumeLease(vmi *virtv1.VirtualMachineInstance, claimName string) error {
+	if claimName == "" {
+		return nil
+	}
+
+	leaseName := fmt.Sprintf("volume-lease-%s", claimName)
+	lease, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
+	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	// 自身がロックを保持している場合のみ解放する
+	if lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == string(vmi.UID) {
+		// 方法A: Lease 自体を削除する場合
+		err = c.clientset.CoordinationV1().Leases(vmi.Namespace).Delete(context.Background(), leaseName, metav1.DeleteOptions{})
+		if err != nil && !k8serrors.IsNotFound(err) {
+			return err
+		}
+
+		/*
+			// 方法B: Lease を残して保持者のみクリアする場合
+			lease.Spec.HolderIdentity = nil
+			lease.Spec.AcquireTime = nil
+			if _, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Update(context.Background(), lease, metav1.UpdateOptions{}); err != nil {
+				return err
+			}
+		*/
+	}
+
+	return nil
+}
+
 func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, dataVolumes []*cdiv1.DataVolume) (common.SyncError, *k8sv1.Pod) {
 	key := controller.VirtualMachineInstanceKey(vmi)
 	defer virtControllerVMIWorkQueueTracer.StepTrace(key, "sync", trace.Field{Key: "VMI Name", Value: vmi.Name})
