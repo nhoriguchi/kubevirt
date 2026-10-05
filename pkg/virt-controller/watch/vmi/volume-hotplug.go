@@ -129,6 +129,13 @@ func (c *Controller) cleanupAttachmentPods(currentPod *k8sv1.Pod, oldPods []*k8s
 			return common.NewSyncError(fmt.Errorf("Error deleting attachment pod %v", err), controller.FailedDeletePodReason)
 		}
 
+		// ★ 追加: アタッチメント Pod 削除完了に伴い、保持していた Lease を解放
+		for _, podVolume := range attachmentPod.Spec.Volumes {
+			if podVolume.PersistentVolumeClaim != nil {
+				c.releaseSingleVolumeLease(vmi, podVolume.PersistentVolumeClaim.ClaimName)
+			}
+		}
+
 		log.Log.Object(vmi).V(3).Infof("Deleted attachment pod %s", attachmentPod.Name)
 	}
 	return nil
@@ -286,6 +293,20 @@ func (c *Controller) createAttachmentPod(vmi *v1.VirtualMachineInstance, virtLau
 	if attachmentPodTemplate == nil {
 		return nil, nil
 	}
+
+	// ★ 追加: Hotplug 対象ボリュームの排他ロックを取得
+	for _, volume := range volumes {
+		claimName := storagetypes.PVCNameFromVirtVolume(volume)
+		if claimName == "" {
+			continue
+		}
+		// static DV と同様に Lease (volume-lease-<claimName>) を取得・チェック
+		if err := c.acquireSingleVolumeLease(vmi, claimName); err != nil {
+			c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, "VolumeLocked", "Hotplug volume %s is locked: %v", claimName, err)
+			return nil, common.NewSyncError(err, "VolumeLocked")
+		}
+	}
+
 	vmiKey := controller.VirtualMachineInstanceKey(vmi)
 	pod, err := c.createPod(vmiKey, vmi.Namespace, attachmentPodTemplate)
 	if err != nil {
