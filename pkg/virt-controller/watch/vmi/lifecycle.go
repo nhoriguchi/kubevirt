@@ -92,10 +92,14 @@ func (c *Controller) acquireVolumeLeases(vmi *virtv1.VirtualMachineInstance) err
 		leaseName := fmt.Sprintf("volume-lease-%s", claimName)
 		lease, err := c.clientset.CoordinationV1().Leases(vmi.Namespace).Get(context.Background(), leaseName, metav1.GetOptions{})
 		if k8serrors.IsNotFound(err) {
+			controllerRef := metav1.NewControllerRef(vmi, virtv1.VirtualMachineInstanceGroupVersionKind)
 			newLease := &coordinationv1.Lease{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      leaseName,
 					Namespace: vmi.Namespace,
+					OwnerReferences: []metav1.OwnerReference{
+						*controllerRef,
+					},
 				},
 				Spec: coordinationv1.LeaseSpec{
 					HolderIdentity: pointer.P(string(vmi.UID)),
